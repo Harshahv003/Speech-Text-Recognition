@@ -2,8 +2,38 @@ import streamlit as st
 import moviepy.editor as mp
 import tempfile
 import io
+import requests
+import json
 from google.cloud import speech_v1p1beta1 as speech
 from google.cloud import texttospeech
+
+# Azure OpenAI connection details
+AZURE_OPENAI_KEY = "22ec84421ec24230a3638d1b51e3a7dc"  # Replace with your actual key
+AZURE_OPENAI_ENDPOINT = "https://internshala.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-08-01-preview"
+
+def correct_text_with_azure(transcription):
+    """Send the transcription to Azure OpenAI GPT-4o for correction."""
+    headers = {
+        "Content-Type": "application/json",
+        "api-key": AZURE_OPENAI_KEY
+    }
+    
+    data = {
+        "messages": [
+            {"role": "user", "content": f"Correct the following text: {transcription}"}
+        ],
+        "max_tokens": 100  # Adjust as needed
+    }
+
+    response = requests.post(AZURE_OPENAI_ENDPOINT, headers=headers, json=data)
+    
+    if response.status_code == 200:
+        result = response.json()
+        corrected_text = result["choices"][0]["message"]["content"].strip()
+        return corrected_text
+    else:
+        st.error(f"Error correcting text: {response.status_code} - {response.text}")
+        return transcription  # Return the original transcription in case of an error
 
 # Streamlit file uploader
 video_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
@@ -51,11 +81,16 @@ if video_file is not None:
         st.write("Transcription:")
         st.write(full_transcription)
 
+        # Correct the transcription using Azure OpenAI
+        corrected_transcription = correct_text_with_azure(full_transcription)
+        st.write("Corrected Transcription:")
+        st.write(corrected_transcription)
+
         # Text-to-Speech
         st.write("Generating audio from text...")
         tts_client = texttospeech.TextToSpeechClient()
 
-        input_text = st.text_area("Enter text to convert to speech:", value=full_transcription)
+        input_text = st.text_area("Enter text to convert to speech:", value=corrected_transcription)
 
         if st.button("Convert Text to Speech"):
             synthesis_input = texttospeech.SynthesisInput(text=input_text)
@@ -81,3 +116,4 @@ if video_file is not None:
             # Provide a link to download the audio file
             st.success("Audio generated successfully!")
             st.audio(output_audio_filename)  # Stream the audio file in the app
+
