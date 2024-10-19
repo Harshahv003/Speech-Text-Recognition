@@ -16,7 +16,7 @@ def correct_text_with_azure(transcription):
     """Send transcription to Azure OpenAI GPT-4o for correction."""
     headers = {
         "Content-Type": "application/json",
-        "api-key": AZURE_OPENAI_KEY
+        "api-key":  4f23456789012345678901234567890
     }
     
     data = {
@@ -36,14 +36,30 @@ def correct_text_with_azure(transcription):
         return transcription  # Return original transcription in case of error
 
 def main():
-    # Custom CSS for background color
+    # Custom CSS for background image and styles
     st.markdown("""
         <style>
         .reportview-container {
-            background-color: #f0f2f5;  /* Light gray background */
+            background-image: url("https://example.com/your-background-image.jpg"); /* Replace with your image URL */
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            color: #ffffff;  /* White text color for contrast */
         }
         .sidebar .sidebar-content {
-            background-color: #ffffff;  /* White sidebar background */
+            background-color: rgba(255, 255, 255, 0.9);  /* Semi-transparent white sidebar background */
+            border-radius: 10px;  /* Rounded corners for sidebar */
+        }
+        h1, h2, h3 {
+            font-family: 'Arial', sans-serif;  /* Change font family */
+            text-align: center;  /* Center align headers */
+        }
+        .stButton>button {
+            background-color: #0072B1; /* Button color */
+            color: white; /* Button text color */
+            border-radius: 5px; /* Rounded button corners */
+            height: 3em; /* Button height */
+            width: 10em; /* Button width */
         }
         </style>
         """, unsafe_allow_html=True)
@@ -134,5 +150,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
