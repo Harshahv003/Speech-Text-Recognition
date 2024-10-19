@@ -1,56 +1,83 @@
 import streamlit as st
-from openai import OpenAI
+import moviepy.editor as mp
+import tempfile
+import io
+from google.cloud import speech_v1p1beta1 as speech
+from google.cloud import texttospeech
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+# Streamlit file uploader
+video_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+if video_file is not None:
+    # Create a temporary file to store the uploaded video content
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
+        temp_file.write(video_file.read())
+        temp_filename = temp_file.name
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+    # Load the video from the temporary file using MoviePy
+    video_clip = mp.VideoFileClip(temp_filename)
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    # Check if the video has audio
+    if video_clip.audio is None:
+        st.error("No audio found in the uploaded video.")
+    else:
+        # Extract audio from video and save it temporarily
+        audio_filename = temp_filename.replace('.mp4', '.wav')
+        video_clip.audio.write_audiofile(audio_filename, codec='pcm_s16le')
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+        # Speech-to-Text
+        st.write("Transcribing audio...")
+        client = speech.SpeechClient()
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+        with io.open(audio_filename, "rb") as audio_file:
+            content = audio_file.read()
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
+        audio = speech.RecognitionAudio(content=content)
+        config = speech.RecognitionConfig(
+            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+            sample_rate_hertz=16000,
+            language_code="en-US",
         )
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        response = client.recognize(config=config, audio=audio)
+
+        # Collect the transcriptions
+        transcriptions = []
+        for result in response.results:
+            transcriptions.append(result.alternatives[0].transcript)
+
+        # Join the transcriptions
+        full_transcription = " ".join(transcriptions)
+        st.write("Transcription:")
+        st.write(full_transcription)
+
+        # Text-to-Speech
+        st.write("Generating audio from text...")
+        tts_client = texttospeech.TextToSpeechClient()
+
+        input_text = st.text_area("Enter text to convert to speech:", value=full_transcription)
+
+        if st.button("Convert Text to Speech"):
+            synthesis_input = texttospeech.SynthesisInput(text=input_text)
+
+            voice = texttospeech.VoiceSelectionParams(
+                language_code="en-US",
+                ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
+            )
+
+            audio_config = texttospeech.AudioConfig(
+                audio_encoding=texttospeech.AudioEncoding.MP3,
+            )
+
+            response = tts_client.synthesize_speech(
+                input=synthesis_input, voice=voice, audio_config=audio_config
+            )
+
+            # Save the generated audio to a file
+            output_audio_filename = "output_audio.mp3"
+            with open(output_audio_filename, "wb") as out:
+                out.write(response.audio_content)
+
+            # Provide a link to download the audio file
+            st.success("Audio generated successfully!")
+            st.audio(output_audio_filename)  # Stream the audio file in the app
