@@ -16,7 +16,7 @@ def correct_text_with_azure(transcription):
     """Send transcription to Azure OpenAI GPT-4o for correction."""
     headers = {
         "Content-Type": "application/json",
-        "api-key":  4f23456789012345678901234567890
+        "api-key": AZURE_OPENAI_KEY
     }
     
     data = {
@@ -150,3 +150,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
