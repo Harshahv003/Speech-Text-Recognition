@@ -149,7 +149,31 @@ def main():
                 st.audio(output_audio_filename)  # Stream the audio file in the app
 
 if __name__ == "__main__":
-    main()
+    main()    
+from google.cloud import speech_v1p1beta1 as speech
+from google.api_core.exceptions import GoogleAPICallError, RetryError
+from google.auth.exceptions import TransportError
+
+def recognize_speech(audio_file_path):
+    try:
+        client = speech.SpeechClient()
+        with open(audio_file_path, 'rb') as audio_file:
+            audio_data = audio_file.read()
+
+        audio = speech.RecognitionAudio(content=audio_data)
+        config = speech.RecognitionConfig(
+            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+            sample_rate_hertz=16000,
+            language_code="en-US",
+        )
+        
+        # Set a timeout and handle exceptions
+        response = client.recognize(config=config, audio=audio, timeout=60)
+        return response
+
+    except (GoogleAPICallError, RetryError, TransportError) as e:
+        st.error(f"Error recognizing speech: {e}")
+        return None
 
 
 
