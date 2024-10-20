@@ -1,179 +1,94 @@
 import streamlit as st
-import moviepy.editor as mp
-import tempfile
-import io
 import requests
-import json
-from google.cloud import speech_v1p1beta1 as speech
-from google.cloud import texttospeech
+import moviepy.editor as mp
+import os
 
-# Azure OpenAI connection details
-AZURE_OPENAI_KEY = "22ec84421ec24230a3638d1b51e3a7dc"  # Your Azure OpenAI key
-AZURE_OPENAI_ENDPOINT = "https://internshala.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-08-01-preview"
+# Set the environment variables for Azure OpenAI
+API_KEY = "22ec84421ec24230a3638d1b51e3a7dc"
+ENDPOINT = "https://internshala.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-08-01-preview"
 
-# Function to correct text using Azure OpenAI
-def correct_text_with_azure(transcription):
-    """Send transcription to Azure OpenAI GPT-4o for correction."""
+# Function to extract audio from video
+def extract_audio_from_video(video_file):
+    # Save the uploaded video to a temporary file
+    video_file_path = "temp_video.mp4"
+    with open(video_file_path, "wb") as f:
+        f.write(video_file.getbuffer())
+
+    # Extract audio using moviepy
+    video = mp.VideoFileClip(video_file_path)
+    audio_file_path = "extracted_audio.wav"
+    video.audio.write_audiofile(audio_file_path)
+    return audio_file_path
+
+# Function to transcribe audio using Azure OpenAI
+import base64
+
+import requests
+import base64
+
+def transcribe_audio(audio_file_path):
+    with open(audio_file_path, "rb") as audio_file:
+        audio_data = audio_file.read()
+
+    # Encode audio data to base64
+    audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+
     headers = {
+        "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
-        "api-key": AZURE_OPENAI_KEY
     }
-    
+
     data = {
+        "model": "gpt-4o",  # Specify the model if required
         "messages": [
-            {"role": "user", "content": f"Correct the following text: {transcription}"}
+            {"role": "user", "content": "Please transcribe this audio."}
         ],
-        "max_tokens": 100  # Adjust as needed
+        "audio": audio_base64  # Send the base64 encoded audio
     }
 
-    response = requests.post(AZURE_OPENAI_ENDPOINT, headers=headers, json=data)
+    response = requests.post(ENDPOINT, headers=headers, json=data)
     
+    # Debugging: Print the raw response for troubleshooting
+    print("Response status code:", response.status_code)
+    print("Response content:", response.content)
+
     if response.status_code == 200:
-        result = response.json()
-        return result["choices"][0]["message"]["content"].strip()
+        try:
+            json_response = response.json()
+            if "choices" in json_response and len(json_response["choices"]) > 0:
+                return json_response["choices"][0]["message"]["content"]
+            else:
+                print("Unexpected response structure from the API.")
+                return "Error in transcription."
+        except Exception as e:
+            print(f"Error parsing response: {e}")
+            return "Error in transcription."
     else:
-        st.error(f"Error correcting text: {response.status_code} - {response.text}")
-        return transcription  # Return original transcription in case of error
+        print(f"API request failed with status {response.status_code}: {response.text}")
+        return "Error in transcription."
 
+
+# Streamlit UI
 def main():
-    # Custom CSS for background image and styles
-    st.markdown("""
-        <style>
-        .reportview-container {
-            background-image: url("https://example.com/your-background-image.jpg"); /* Replace with your image URL */
-            background-size: cover;
-            background-repeat: no-repeat;
-            background-attachment: fixed;
-            color: #ffffff;  /* White text color for contrast */
-        }
-        .sidebar .sidebar-content {
-            background-color: rgba(255, 255, 255, 0.9);  /* Semi-transparent white sidebar background */
-            border-radius: 10px;  /* Rounded corners for sidebar */
-        }
-        h1, h2, h3 {
-            font-family: 'Arial', sans-serif;  /* Change font family */
-            text-align: center;  /* Center align headers */
-        }
-        .stButton>button {
-            background-color: #0072B1; /* Button color */
-            color: white; /* Button text color */
-            border-radius: 5px; /* Rounded button corners */
-            height: 3em; /* Button height */
-            width: 10em; /* Button width */
-        }
-        </style>
-        """, unsafe_allow_html=True)
-
-    st.title("🎤 Video Audio Processing App")
-
-    # Streamlit file uploader
+    st.title("Video to Text Transcription")
+    
     video_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi"])
-
+    
     if video_file is not None:
-        # Create a temporary file to store the uploaded video content
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
-            temp_file.write(video_file.read())
-            temp_filename = temp_file.name
+        # Step 1: Extract audio from video
+        audio_file_path = extract_audio_from_video(video_file)
+        st.success("Audio extracted successfully.")
 
-        # Load the video from the temporary file using MoviePy
-        video_clip = mp.VideoFileClip(temp_filename)
-
-        # Check if the video has audio
-        if video_clip.audio is None:
-            st.error("No audio found in the uploaded video.")
-        else:
-            # Extract audio from video and save it temporarily
-            audio_filename = temp_filename.replace('.mp4', '.wav')
-            video_clip.audio.write_audiofile(audio_filename, codec='pcm_s16le')
-
-            # Speech-to-Text
-            st.write("Transcribing audio...")
-            client = speech.SpeechClient()
-
-            with io.open(audio_filename, "rb") as audio_file:
-                content = audio_file.read()
-
-            audio = speech.RecognitionAudio(content=content)
-            config = speech.RecognitionConfig(
-                encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-                sample_rate_hertz=16000,
-                language_code="en-US",
-            )
-
-            response = client.recognize(config=config, audio=audio)
-
-            # Collect the transcriptions
-            transcriptions = []
-            for result in response.results:
-                transcriptions.append(result.alternatives[0].transcript)
-
-            # Join the transcriptions
-            full_transcription = " ".join(transcriptions)
-            st.write("Transcription:")
-            st.write(full_transcription)
-
-            # Correct the transcription using Azure OpenAI
-            corrected_transcription = correct_text_with_azure(full_transcription)
-            st.write("Corrected Transcription:")
-            st.write(corrected_transcription)
-
-            # Text-to-Speech
-            st.write("Generating audio from text...")
-            tts_client = texttospeech.TextToSpeechClient()
-
-            input_text = st.text_area("Enter text to convert to speech:", value=corrected_transcription)
-
-            if st.button("Convert Text to Speech"):
-                synthesis_input = texttospeech.SynthesisInput(text=input_text)
-
-                voice = texttospeech.VoiceSelectionParams(
-                    language_code="en-US",
-                    ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
-                )
-
-                audio_config = texttospeech.AudioConfig(
-                    audio_encoding=texttospeech.AudioEncoding.MP3,
-                )
-
-                response = tts_client.synthesize_speech(
-                    input=synthesis_input, voice=voice, audio_config=audio_config
-                )
-
-                # Save the generated audio to a file
-                output_audio_filename = "output_audio.mp3"
-                with open(output_audio_filename, "wb") as out:
-                    out.write(response.audio_content)
-
-                # Provide a link to download the audio file
-                st.success("Audio generated successfully!")
-                st.audio(output_audio_filename)  # Stream the audio file in the app
+        # Step 2: Transcribe the extracted audio
+        transcription = transcribe_audio(audio_file_path)
+        
+        # Display transcription
+        st.subheader("Transcription:")
+        st.write(transcription)
+        
+        # Clean up temporary files
+        os.remove(audio_file_path)
+        os.remove("temp_video.mp4")
 
 if __name__ == "__main__":
-    main()    
-from google.cloud import speech_v1p1beta1 as speech
-from google.api_core.exceptions import GoogleAPICallError, RetryError
-from google.auth.exceptions import TransportError
-
-def recognize_speech(audio_file_path):
-    try:
-        client = speech.SpeechClient()
-        with open(audio_file_path, 'rb') as audio_file:
-            audio_data = audio_file.read()
-
-        audio = speech.RecognitionAudio(content=audio_data)
-        config = speech.RecognitionConfig(
-            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=16000,
-            language_code="en-US",
-        )
-        
-        # Set a timeout and handle exceptions
-        response = client.recognize(config=config, audio=audio, timeout=60)
-        return response
-
-    except (GoogleAPICallError, RetryError, TransportError) as e:
-        st.error(f"Error recognizing speech: {e}")
-        return None
-
-
-
+    main()
